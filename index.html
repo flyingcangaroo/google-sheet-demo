@@ -1,0 +1,52 @@
+<!-- file: index.html -->
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <title>Google Sheets teszt</title>
+</head>
+<body>
+    <h1>Adatok Google Sheets-ből</h1>
+    <table border="1" id="adatTabla">
+        <thead></thead>
+        <tbody></tbody>
+    </table>
+
+    <script>
+        // Itt add meg a saját Google Sheet azonosítód
+        const SHEET_ID = "IDE_IRD_A_TÁBLÁZAT_ID-JÉT";
+        const SHEET_NAME = "Sheet1"; // vagy a lap neve
+        const CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${SHEET_NAME}`;
+
+        fetch(CSV_URL)
+            .then(res => res.text())
+            .then(csvText => {
+                const rows = csvText.split("\n").map(r => r.split(","));
+                const table = document.getElementById("adatTabla");
+                
+                // Fejléc
+                const thead = table.querySelector("thead");
+                const headRow = document.createElement("tr");
+                rows[0].forEach(cell => {
+                    const th = document.createElement("th");
+                    th.textContent = cell;
+                    headRow.appendChild(th);
+                });
+                thead.appendChild(headRow);
+
+                // Sorok
+                const tbody = table.querySelector("tbody");
+                rows.slice(1).forEach(row => {
+                    const tr = document.createElement("tr");
+                    row.forEach(cell => {
+                        const td = document.createElement("td");
+                        td.textContent = cell;
+                        tr.appendChild(td);
+                    });
+                    tbody.appendChild(tr);
+                });
+            })
+            .catch(err => console.error("Hiba a Google Sheet olvasásakor:", err));
+    </script>
+</body>
+</html>
