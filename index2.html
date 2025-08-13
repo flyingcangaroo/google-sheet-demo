@@ -1,0 +1,191 @@
+<!-- =========================================
+# /apps_script/Code.gs  (Google Apps Script)
+# Hely: a meglévő Google Sheet-ben: Extensions → Apps Script
+# Miért: a tokennel védett írás a te jogosultságoddal fusson
+# ========================================= -->
+/** Egyszerű, tokennel védett API a meglévő "Sheet1" laphoz. */
+const SHEET_NAME = 'Sheet1';
+const SECRET_TOKEN = 'csereld-ki-egy-hosszura'; // SECURITY: csak aki tudja, az írhat
+
+function doGet(e) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
+  if (!sheet) {
+    return _json({ ok: false, error: 'Sheet nem található: ' + SHEET_NAME }, 404);
+  }
+  const values = sheet.getDataRange().getDisplayValues(); // fejléccel együtt
+  return _json({ ok: true, rows: values });
+}
+
+function doPost(e) {
+  try {
+    const token = (e?.parameter?.token) || (e?.headers?.['x-token']) || '';
+    if (token !== SECRET_TOKEN) {
+      return _json({ ok: false, error: 'Unauthorized' }, 401); // SECURITY: egyszerű védelem
+    }
+    const body = e.postData && e.postData.contents ? JSON.parse(e.postData.contents) : null;
+    if (!body || typeof body.nev !== 'string' || !String(body.kor ?? '').length) {
+      return _json({ ok: false, error: 'Hiányzó mezők: nev, kor' }, 400);
+    }
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
+    if (!sheet) return _json({ ok: false, error: 'Sheet nem található' }, 404);
+
+    sheet.appendRow([body.nev, body.kor]);
+    return _json({ ok: true, message: 'Mentve' });
+  } catch (err) {
+    return _json({ ok: false, error: String(err) }, 500);
+  }
+}
+
+function _json(obj, status) {
+  const out = ContentService.createTextOutput(JSON.stringify(obj));
+  out.setMimeType(ContentService.MimeType.JSON);
+  if (status) {
+    // Apps Script nem enged tényleges status kódot állítani, de a kliens így is tudja kezelni a body alapján.
+  }
+  return out;
+}
+
+/*
+Telepítés:
+Deploy → New deployment → Web app
+- Execute as: Me
+- Who has access: Anyone
+Másold ki a .../exec URL-t, és illeszd az index.html-ben az API_URL-hez.
+*/
+
+
+<!-- =========================================
+# /web/index.html  (GitHub Pages-re)
+# Cél: ugyanaz a régi táblázat olvasása/írása Apps Script-en át
+# ========================================= -->
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+  <meta charset="UTF-8" />
+  <title>Google Sheets – Olvasás & Írás</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, Arial, sans-serif; margin: 24px; }
+    h1 { margin-bottom: 8px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+    th, td { border: 1px solid #ccc; padding: 8px 10px; }
+    th { background: #f4f4f4; text-align: left; }
+    form { display: grid; grid-template-columns: 1fr 120px; gap: 8px; margin-top: 16px; max-width: 520px; }
+    form input { padding: 8px; }
+    form button { padding: 8px; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; grid-column: 1 / -1; }
+    .muted { color: #666; font-size: 0.9em; }
+    #status { margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <h1>Adatok a Google Sheetből</h1>
+  <div class="muted">A táblázat a <strong>meglévő</strong> sheeted, Apps Scripten át érhető el.</div>
+
+  <table id="adatTabla">
+    <thead></thead>
+    <tbody></tbody>
+  </table>
+
+  <h2>Új sor hozzáadása</h2>
+  <form id="adatForm">
+    <div class="row">
+      <input type="text" id="nev" name="nev" placeholder="Név" required />
+      <input type="number" id="kor" name="kor" placeholder="Kor" min="0" required />
+    </div>
+    <button type="submit">Mentés</button>
+  </form>
+  <div id="status" class="muted"></div>
+
+  <script>
+    // Állítsd be a saját értékeket:
+    const API_URL = 'IDE_ILLESZD_BE_A_APPS_SCRIPT_EXEC_URL-T';     // pl. https://script.google.com/macros/s/.../exec
+    const SECRET_TOKEN = 'csereld-ki-egy-hosszura';                // ugyanaz, mint a Code.gs-ben
+
+    const table = document.getElementById('adatTabla');
+    const thead = table.querySelector('thead');
+    const tbody = table.querySelector('tbody');
+    const statusEl = document.getElementById('status');
+
+    function setStatus(msg) { statusEl.textContent = msg; }
+
+    async function loadData() {
+      setStatus('Betöltés…');
+      try {
+        const res = await fetch(API_URL);
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || 'Ismeretlen hiba');
+
+        // Tábla kirajzolása
+        thead.innerHTML = '';
+        tbody.innerHTML = '';
+        const rows = data.rows || [];
+        if (!rows.length) {
+          thead.innerHTML = '<tr><th>Nincs adat</th></tr>';
+          setStatus('Nincs megjeleníthető adat.');
+          return;
+        }
+        // Fejléc
+        const headRow = document.createElement('tr');
+        for (const h of rows[0]) {
+          const th = document.createElement('th');
+          th.textContent = h;
+          headRow.appendChild(th);
+        }
+        thead.appendChild(headRow);
+        // Sorok
+        for (const row of rows.slice(1)) {
+          const tr = document.createElement('tr');
+          for (const cell of row) {
+            const td = document.createElement('td');
+            td.textContent = cell;
+            tr.appendChild(td);
+          }
+          tbody.appendChild(tr);
+        }
+        setStatus(`Betöltve (${rows.length - 1} sor).`);
+      } catch (err) {
+        setStatus('Hiba betöltéskor: ' + err.message);
+      }
+    }
+
+    document.getElementById('adatForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      setStatus('Mentés…');
+      const payload = {
+        nev: document.getElementById('nev').value.trim(),
+        kor: document.getElementById('kor').value.trim()
+      };
+      if (!payload.nev || !payload.kor) {
+        setStatus('Hiányzó mezők.');
+        return;
+      }
+
+      try {
+        const res = await fetch(API_URL + '?token=' + encodeURIComponent(SECRET_TOKEN), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Token': SECRET_TOKEN // SECURITY: duplán ellenőrzünk
+          },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.ok === false) {
+          throw new Error((data && data.error) || `HTTP ${res.status}`);
+        }
+        // ürítjük a formot és frissítünk
+        e.target.reset();
+        setStatus('Sikeresen mentve. Frissítés…');
+        await loadData();
+        setStatus('Kész.');
+      } catch (err) {
+        setStatus('Hiba mentéskor: ' + err.message);
+      }
+    });
+
+    loadData();
+  </script>
+</body>
+</html>
